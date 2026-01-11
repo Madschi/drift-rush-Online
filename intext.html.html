@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>Drift Rush V51 - Connection Repair</title>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        
+        body { margin: 0; overflow: hidden; background: #020202; font-family: 'Orbitron', sans-serif; user-select: none; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        
+        /* HUD ELEMENTS */
+        #hud { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        #speedometer { 
+            position: absolute; bottom: 30px; right: 30px; text-align: right; 
+            text-shadow: 0 0 20px rgba(0, 234, 255, 0.6);
+        }
+        #speed-val { font-size: 5em; color: #fff; font-weight: 900; line-height: 0.8; }
+        #speed-unit { font-size: 1.2em; color: #00eaff; letter-spacing: 2px; }
+        
+        #connection-status { 
+            position: absolute; top: 20px; left: 20px; 
+            color: #fff; background: rgba(0,0,0,0.6); 
+            padding: 8px 15px; border-radius: 4px; border-left: 3px solid #00ff00;
+            font-family: 'Roboto'; font-size: 0.9em;
+        }
+
+        /* LOBBY / MENU */
+        #menu-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, #111 0%, #000 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 20; color: #fff; pointer-events: auto;
+        }
+        
+        h1 { 
+            font-size: 6em; margin: 0; 
+            background: linear-gradient(to right, #00eaff, #ff0099); 
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
+            filter: drop-shadow(0 0 30px rgba(0, 234, 255, 0.4));
+            font-style: italic; letter-spacing: -2px;
+        }
+        h2 { margin-top: -10px; color: #888; font-size: 1.2em; letter-spacing: 5px; }
+        
+        .panel { 
+            background: rgba(20,20,20,0.95); padding: 40px; border: 1px solid #333; 
+            border-radius: 10px; width: 500px; text-align: center; 
+            box-shadow: 0 0 60px rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+        }
+        
+        input[type="text"] { 
+            width: 70%; padding: 15px; font-size: 1.3em; text-align: center; margin: 15px 0;
+            background: #000; border: 2px solid #444; color: #fff; font-family: 'Orbitron'; 
+            border-radius: 5px; outline: none; transition: 0.3s;
+        }
+        input:focus { border-color: #00eaff; box-shadow: 0 0 15px rgba(0, 234, 255, 0.2); }
+        
+        button {
+            width: 100%; padding: 15px; margin-top: 10px; font-size: 1.3em; font-weight: bold;
+            border: none; cursor: pointer; font-family: 'Orbitron'; color: #000;
+            background: linear-gradient(45deg, #00eaff, #0088ff); 
+            transition: 0.2s; border-radius: 5px;
+        }
+        button:hover { transform: scale(1.02); filter: brightness(1.2); }
+        button.secondary { background: transparent; border: 2px solid #444; color: #888; width: auto; padding: 10px 30px; margin-top: 20px; font-size: 1em; }
+        button.secondary:hover { border-color: #fff; color: #fff; }
+
+        /* LOBBY LIST */
+        #lobby-player-list { margin: 20px 0; text-align: left; background: #111; padding: 10px; border-radius: 5px; }
+        .lobby-player { padding: 5px; border-bottom: 1px solid #333; color: #aaa; }
+        .lobby-player.ready { color: #00ff00; }
+
+        #id-display { font-size: 3em; color: #00eaff; margin: 10px 0; font-weight: bold; cursor: pointer; text-shadow: 0 0 10px rgba(0, 234, 255, 0.5); }
+        #debug-status { color: #666; font-size: 0.8em; margin-top: 5px; min-height: 20px; }
+        
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="hud">
+            <div id="connection-status">Verbinde...</div>
+            <div id="speedometer">
+                <div id="speed-val">0</div>
+                <div id="speed-unit">KM/H</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="menu-screen">
+        <h1>DRIFT RUSH</h1>
+        <h2>ONLINE V51</h2>
+        
+        <div id="start-panel" class="panel">
+            <input type="text" id="my-name" placeholder="DEIN NAME" maxlength="10" value="Racer">
+            <div style="margin-bottom: 20px; font-size: 0.8em; color: #666;">Auto Farbe & Neon wird zufällig zugewiesen!</div>
+            
+            <button onclick="createLobby()">HOST GAME</button>
+            <div style="margin:10px; color:#444;">- ODER -</div>
+            <button onclick="showJoin()" style="background: linear-gradient(45deg, #ff0099, #ff5500); color:#fff;">JOIN GAME</button>
+        </div>
+
+        <div id="host-panel" class="panel" style="display:none;">
+            <div style="color:#aaa;">RAUM NUMMER</div>
+            <div id="id-display" onclick="copyId()">Lade...</div>
+            <div id="debug-status">Initialisiere Netzwerk...</div>
+            
+            <div id="lobby-player-list">
+                <div class="lobby-player ready">1. Du (Host)</div>
+            </div>
+            
+            <button onclick="hostStartGame()">STARTEN</button>
+            <button class="secondary" onclick="location.reload()">ABBRECHEN</button>
+        </div>
+
+        <div id="join-panel" class="panel" style="display:none;">
+            <div style="color:#aaa;">ID EINGEBEN</div>
+            <input type="text" id="join-id" placeholder="1234" maxlength="4" style="font-size:2em; letter-spacing:5px;">
+            <button onclick="joinLobby()">VERBINDEN</button>
+            <div id="join-status" style="margin-top:10px; color:#ff0099;"></div>
+            <button class="secondary" onclick="location.reload()">ZURÜCK</button>
+        </div>
+    </div>
+
+    <audio id="sfx-drift" loop><source src="https://actions.google.com/sounds/v1/vehicles/skidding.ogg" type="audio/ogg"></audio>
+
+    <script>
+        // --- KONFIGURATION ---
+        const ID_PREFIX = "dr-v51-static-"; // STATISCHER PREFIX (WICHTIG!)
+        
+        const PEER_CONFIG = {
+            debug: 1,
+            config: { 'iceServers': [ { url: 'stun:stun.l.google.com:19302' } ] }
+        };
+        
+        // Farben + Emissive (Neon)
+        const PLAYER_CONFIGS = [
+            { color: 0x00eaff, emissive: 0x004455 }, // Cyan
+            { color: 0xff0099, emissive: 0x550033 }, // Pink
+            { color: 0xffff00, emissive: 0x555500 }, // Gelb
+            { color: 0x00ff00, emissive: 0x005500 }  // Grün
+        ];
+        
+        // --- GLOBALS ---
+        let scene, camera, renderer, clock;
+        let myId = null;
+        let players = {}; 
+        let myCar = null;
+        let velocity = new THREE.Vector3();
+        let keys = {};
+        let particles = [];
+
+        // Network
+        let peer;
+        let isHost = false;
+        let hostConn = null; 
+        let clientConns = {}; 
+        let myName = "Player";
+        let gameActive = false;
+        let connectAttempts = 0;
+
+        // --- NETWORK SETUP (ROBUST) ---
+
+        function createLobby() {
+            myName = document.getElementById('my-name').value || "Host";
+            isHost = true;
+            document.getElementById('start-panel').style.display = 'none';
+            document.getElementById('host-panel').style.display = 'block';
+            
+            tryConnectPeer();
+        }
+
+        function tryConnectPeer() {
+            connectAttempts++;
+            document.getElementById('debug-status').innerText = "Verbindungsversuch " + connectAttempts + "...";
+            
+            // Random 4-stellige ID
+            const numId = Math.floor(1000 + Math.random() * 9000);
+            const fullId = ID_PREFIX + numId;
+            
+            if(peer) peer.destroy();
+            peer = new Peer(fullId, PEER_CONFIG);
+            
+            peer.on('open', (id) => {
+                myId = id;
+                document.getElementById('id-display').innerText = numId;
+                document.getElementById('debug-status').innerText = "Bereit! ID teilen.";
+                document.getElementById('debug-status').style.color = "#00ff00";
+                
+                players[myId] = { name: myName, config: PLAYER_CONFIGS[0], isMe: true };
+                updateLobbyUI();
+            });
+
+            peer.on('connection', (conn) => {
+                clientConns[conn.peer] = conn;
+                conn.on('data', (data) => handleHostData(conn.peer, data));
+                conn.on('close', () => {
+                    delete clientConns[conn.peer];
+                    delete players[conn.peer];
+                    broadcast({ type: 'player_left', id: conn.peer });
+                    updateLobbyUI();
+                });
+            });
+            
+            peer.on('error', (err) => {
+                console.log("Peer Error:", err.type);
+                if(err.type === 'unavailable-id') {
+                    // ID belegt -> sofort neu probieren
+                    setTimeout(tryConnectPeer, 50); 
+                } else if (err.type === 'network' || err.type === 'server-error') {
+                    document.getElementById('debug-status').innerText = "Netzwerkfehler. Prüfe Internet.";
+                }
+            });
+        }
+
+        function showJoin() {
+            myName = document.getElementById('my-name').value || "Gast";
+            document.getElementById('start-panel').style.display = 'none';
+            document.getElementById('join-panel').style.display = 'block';
+        }
+
+        function joinLobby() {
+            const inputId = document.getElementById('join-id').value;
+            if(inputId.length !== 4) {
+                document.getElementById('join-status').innerText = "ID muss 4 Zahlen haben.";
+                return;
+            }
+            document.getElementById('join-status').innerText = "Verbinde...";
+            
+            if(peer) peer.destroy();
+            peer = new Peer(null, PEER_CONFIG);
+            
+            peer.on('open', (id) => {
+                myId = id;
+                // Verbinde zum STATISCHEN Prefix + Nummer
+                hostConn = peer.connect(ID_PREFIX + inputId);
+                
+                // Timeout Watchdog
+                setTimeout(() => {
+                    if(!hostConn.open && !gameActive) {
+                        document.getElementById('join-status').innerText = "Verbindung fehlgeschlagen. ID prüfen.";
+                    }
+                }, 5000);
+
+                hostConn.on('open', () => {
+                    document.getElementById('join-status').innerText = "In Lobby! Warte auf Host...";
+                    hostConn.send({ type: 'join', name: myName });
+                });
+                
+                hostConn.on('data', (data) => handleClientData(data));
+                hostConn.on('close', () => { alert("Verbindung verloren."); location.reload(); });
+            });
+            
+            peer.on('error', (err) => {
+                document.getElementById('join-status').innerText = "Fehler: " + err.type;
+            });
+        }
+
+        // --- HOST LOGIC ---
+        function handleHostData(clientId, data) {
+            if(data.type === 'join') {
+                const slot = Object.keys(players).length;
+                if(slot >= 4) return; 
+                players[clientId] = { name: data.name, config: PLAYER_CONFIGS[slot], isMe: false };
+                broadcastLobbyState();
+                updateLobbyUI();
+            } else if(data.type === 'update') {
+                if(players[clientId]) {
+                    players[clientId].pos = data.pos;
+                    players[clientId].rot = data.rot;
+                    players[clientId].drift = data.drift;
+                }
+            }
+        }
+
+        function hostStartGame() {
+            broadcast({ type: 'start_game', allPlayers: players });
+            startGame(players);
+        }
+
+        function broadcastLobbyState() {
+            broadcast({ type: 'lobby_update', allPlayers: players });
+        }
+
+        function broadcast(msg) {
+            Object.values(clientConns).forEach(conn => conn.send(msg));
+        }
+
+        function updateLobbyUI() {
+            const list = document.getElementById('lobby-player-list');
+            list.innerHTML = "";
+            Object.values(players).forEach(p => {
+                const div = document.createElement('div');
+                div.className = "lobby-player ready";
+                div.innerText = p.name;
+                list.appendChild(div);
+            });
+        }
+
+        // --- CLIENT LOGIC ---
+        function handleClientData(data) {
+            if(data.type === 'lobby_update') {
+                document.getElementById('join-status').innerText = "Lobby: " + Object.keys(data.allPlayers).length + " Spieler";
+            } else if(data.type === 'start_game') {
+                data.allPlayers[myId].isMe = true;
+                startGame(data.allPlayers);
+            } else if(data.type === 'world_update') {
+                Object.keys(data.updates).forEach(id => {
+                    if(id !== myId && players[id] && players[id].mesh) {
+                        const info = data.updates[id];
+                        players[id].mesh.position.lerp(info.pos, 0.3);
+                        
+                        let diff = info.rot - players[id].mesh.rotation.y;
+                        while(diff > Math.PI) diff -= Math.PI*2;
+                        while(diff < -Math.PI) diff += Math.PI*2;
+                        players[id].mesh.rotation.y += diff * 0.3;
+                        
+                        if(info.drift && Math.random() > 0.5) createSmoke(players[id].mesh.position);
+                    }
+                });
+            }
+        }
+
+        // --- GAME LOOP ---
+        function startGame(playerList) {
+            players = playerList;
+            gameActive = true;
+            document.getElementById('menu-screen').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('connection-status').innerText = "🟢 Online";
+            
+            init3D();
+            
+            Object.keys(players).forEach((id, index) => {
+                const p = players[id];
+                const car = createCarMesh(p.config.color, p.config.emissive);
+                car.position.set( (index-1.5) * 6, 0.5, 0 ); 
+                scene.add(car);
+                p.mesh = car;
+                addNametag(car, p.name);
+                if(p.isMe) myCar = car;
+            });
+
+            animate();
+            
+            setInterval(() => {
+                if(isHost) {
+                    const updates = {};
+                    Object.keys(players).forEach(id => {
+                        if(players[id].mesh) {
+                            updates[id] = {
+                                pos: players[id].isMe ? myCar.position : players[id].pos, 
+                                rot: players[id].isMe ? myCar.rotation.y : players[id].rot,
+                                drift: players[id].drift
+                            };
+                        }
+                    });
+                    broadcast({ type: 'world_update', updates: updates });
+                } else {
+                    if(myCar) {
+                        hostConn.send({
+                            type: 'update',
+                            pos: myCar.position,
+                            rot: myCar.rotation.y,
+                            drift: (Math.abs(velocity.dot(new THREE.Vector3(1,0,0).applyQuaternion(myCar.quaternion))) > 5)
+                        });
+                    }
+                }
+            }, 50);
+        }
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050505);
+            scene.fog = new THREE.FogExp2(0x050505, 0.003);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({antialias: true});
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping; 
+            document.body.appendChild(renderer.domElement);
+
+            const amb = new THREE.AmbientLight(0x222222);
+            scene.add(amb);
+            
+            const moon = new THREE.DirectionalLight(0x88ccff, 0.5);
+            moon.position.set(-50, 100, -50);
+            moon.castShadow = true;
+            moon.shadow.mapSize.width = 2048; moon.shadow.mapSize.height = 2048;
+            scene.add(moon);
+
+            createMap();
+            
+            clock = new THREE.Clock();
+            
+            window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+            window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth/window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function createMap() {
+            // FIX: Procedural Dark Asphalt (Nie wieder weiß)
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#111'; ctx.fillRect(0,0,512,512); 
+            for(let i=0; i<10000; i++) {
+                ctx.fillStyle = Math.random()>0.5 ? '#1a1a1a' : '#0a0a0a';
+                ctx.fillRect(Math.random()*512, Math.random()*512, 2, 2);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(100, 100);
+            
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(1000, 1000),
+                new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0.2 })
+            );
+            floor.rotation.x = -Math.PI/2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Zöchi Memorial
+            const podium = new THREE.Mesh(new THREE.CylinderGeometry(5, 6, 2, 32), new THREE.MeshStandardMaterial({color:0x333}));
+            podium.position.set(0, 1, -50);
+            scene.add(podium);
+            const statue = createCarMesh(0x0000ff, 0x0000aa);
+            statue.position.set(0, 3, -50);
+            statue.rotation.set(-0.2, 0.5, 0.2);
+            scene.add(statue);
+            
+            // Skyline
+            for(let i=0; i<60; i++) {
+                const h = 20 + Math.random()*60;
+                const building = new THREE.Mesh(
+                    new THREE.BoxGeometry(10+Math.random()*20, h, 10+Math.random()*20),
+                    new THREE.MeshStandardMaterial({color:0x111111, emissive:0x050505})
+                );
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 80 + Math.random() * 200;
+                building.position.set(Math.cos(angle)*dist, h/2, Math.sin(angle)*dist);
+                scene.add(building);
+                
+                if(Math.random()>0.7) {
+                    const pl = new THREE.PointLight(Math.random()>0.5 ? 0x00eaff : 0xff0099, 1, 50);
+                    pl.position.copy(building.position);
+                    pl.position.y = 5;
+                    scene.add(pl);
+                }
+            }
+        }
+
+        function createCarMesh(color, emissive) {
+            const grp = new THREE.Group();
+            
+            // Body
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: color, metalness: 0.7, roughness: 0.2,
+                emissive: emissive, emissiveIntensity: 0.3
+            });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 4.4), bodyMat);
+            body.position.y = 0.7; body.castShadow = true;
+            grp.add(body);
+            
+            const cab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 2.2), new THREE.MeshStandardMaterial({color: 0x111111, metalness: 0.9, roughness: 0.1}));
+            cab.position.set(0, 1.3, -0.2);
+            grp.add(cab);
+            
+            // Unterbodenlicht
+            const light = new THREE.PointLight(color, 2, 8);
+            light.position.set(0, 0.2, 0);
+            grp.add(light);
+            
+            // Scheinwerfer
+            const h1 = new THREE.SpotLight(0xffffff, 2, 50, 0.6, 0.5, 1);
+            h1.position.set(0.8, 1, 2); h1.target.position.set(0.8, 0, 10);
+            grp.add(h1); grp.add(h1.target);
+            const h2 = new THREE.SpotLight(0xffffff, 2, 50, 0.6, 0.5, 1);
+            h2.position.set(-0.8, 1, 2); h2.target.position.set(-0.8, 0, 10);
+            grp.add(h2); grp.add(h2.target);
+
+            // Bessere Reifen (Felgen)
+            const wGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.35, 24);
+            const wMat = new THREE.MeshStandardMaterial({color: 0x111111});
+            const rimGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.36, 16);
+            const rimMat = new THREE.MeshStandardMaterial({color: 0xcccccc, metalness: 0.8, roughness: 0.2});
+
+            const wheels = [
+                {x:1.2, z:1.4}, {x:-1.2, z:1.4}, {x:1.2, z:-1.4}, {x:-1.2, z:-1.4}
+            ];
+            wheels.forEach(p => {
+                const wGrp = new THREE.Group();
+                const tire = new THREE.Mesh(wGeo, wMat);
+                tire.rotation.z = Math.PI/2;
+                wGrp.add(tire);
+                
+                const rim = new THREE.Mesh(rimGeo, rimMat);
+                rim.rotation.z = Math.PI/2;
+                wGrp.add(rim);
+                
+                wGrp.position.set(p.x, 0.4, p.z);
+                wGrp.castShadow = true;
+                grp.add(wGrp);
+            });
+
+            return grp;
+        }
+
+        function addNametag(parent, name) {
+            const cvs = document.createElement('canvas');
+            const ctx = cvs.getContext('2d');
+            cvs.width = 256; cvs.height = 64;
+            ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0,0,256,64);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial"; 
+            ctx.textAlign = "center"; ctx.fillText(name, 128, 45);
+            const spr = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(cvs)}));
+            spr.position.set(0, 3, 0);
+            spr.scale.set(4, 1, 1);
+            parent.add(spr);
+        }
+
+        function createSmoke(pos) {
+            const geo = new THREE.PlaneGeometry(0.6, 0.6);
+            const mat = new THREE.MeshBasicMaterial({color:0x555555, transparent:true, opacity:0.4, side:THREE.DoubleSide});
+            const p = new THREE.Mesh(geo, mat);
+            p.position.copy(pos);
+            p.position.y = 0.1;
+            p.rotation.x = -Math.PI/2;
+            p.userData = { life: 1.0 };
+            scene.add(p);
+            particles.push(p);
+        }
+
+        function updatePhysics(dt) {
+            if(!myCar) return;
+            
+            let drive = 0;
+            if(keys['w']) drive = 150; 
+            if(keys['s']) drive = -50;
+            let steer = 0;
+            if(keys['a']) steer = 1;
+            if(keys['d']) steer = -1;
+            
+            const fwd = new THREE.Vector3(0,0,1).applyQuaternion(myCar.quaternion);
+            const right = new THREE.Vector3(1,0,0).applyQuaternion(myCar.quaternion);
+            
+            velocity.add(fwd.multiplyScalar(drive * dt));
+            velocity.multiplyScalar(0.98); 
+            
+            const speed = velocity.length();
+            let grip = 0.95;
+            if(keys[' ']) { grip = 0.1; } 
+            
+            const fwdVel = velocity.dot(fwd);
+            const sideVel = velocity.dot(right);
+            
+            velocity.add(right.multiplyScalar(-sideVel * grip * 5.0 * dt));
+            myCar.position.add(velocity.clone().multiplyScalar(dt));
+            myCar.rotation.y += steer * 2.8 * dt * (speed/15);
+            
+            const driftAngle = Math.abs(sideVel);
+            if(driftAngle > 5 && speed > 5) {
+                players[myId].drift = true;
+                if(Math.random()>0.5) createSmoke(myCar.position);
+            } else {
+                players[myId].drift = false;
+            }
+            document.getElementById('speed-val').innerText = Math.floor(speed*3);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameActive) return;
+            const dt = Math.min(clock.getDelta(), 0.1);
+            updatePhysics(dt);
+            
+            for(let i=particles.length-1; i>=0; i--) {
+                const p = particles[i];
+                p.userData.life -= dt;
+                p.material.opacity = p.userData.life * 0.4;
+                p.scale.multiplyScalar(1.05);
+                p.position.y += dt;
+                if(p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i,1);
+                }
+            }
+
+            if(myCar) {
+                const off = new THREE.Vector3(0, 5, -12);
+                off.applyQuaternion(myCar.quaternion);
+                const target = myCar.position.clone().add(off);
+                camera.position.lerp(target, 0.1);
+                camera.lookAt(myCar.position.clone().add(new THREE.Vector3(0,0,10).applyQuaternion(myCar.quaternion)));
+            }
+            renderer.render(scene, camera);
+        }
+
+        function copyId() {
+            const id = document.getElementById('id-display').innerText;
+            navigator.clipboard.writeText(id);
+            alert("ID kopiert!");
+        }
+    </script>
+</body>
+</html>
